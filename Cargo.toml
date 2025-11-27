@@ -1,0 +1,9 @@
+[package]
+name = "clam-shell"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gnu-readline-sys = "0.1.0"
+libc = "0.2"
+
