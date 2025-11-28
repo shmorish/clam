@@ -1,1 +1,5 @@
+# Ignore target directory
 /target
+
+# History file for clam-shell
+.clam_history

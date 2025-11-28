@@ -1,57 +1,43 @@
-use gnu_readline_sys::readline;
-use std::ffi::{CStr, CString};
-use std::os::raw::c_char;
+use rustyline::error::ReadlineError;
+use rustyline::history::FileHistory;
+use rustyline::{Editor, Result};
 
-fn main() {
-    let ps1 = "$ ";
+fn main() -> Result<()> {
+    let mut rl: Editor<(), FileHistory> = Editor::new()?;
+    let history_file = ".clam_history";
+
+    // 履歴ファイルから読み込み
+    let _ = rl.load_history(history_file);
 
     loop {
-        let input = read_line(ps1);
-
-        match input {
-            Some(line) => {
-                if line.is_empty() {
+        match rl.readline("$ ") {
+            Ok(line) => {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
                     continue;
                 }
-                println!("Input: {}", line);
+
+                // 履歴に追加
+                let _ = rl.add_history_entry(&line);
+                println!("Input: {}", trimmed);
             }
-            None => {
+            Err(ReadlineError::Interrupted) => {
+                // Ctrl+C
+                println!("^C");
+            }
+            Err(ReadlineError::Eof) => {
                 // Ctrl+D (EOF) でループを抜ける
                 println!();
                 break;
             }
+            Err(err) => {
+                eprintln!("Error: {:?}", err);
+                break;
+            }
         }
     }
-}
 
-/// readlineを使って1行読み込む
-/// メモリ安全性を確保するため、RAIIパターンでメモリ管理を行う
-fn read_line(prompt: &str) -> Option<String> {
-    // promptをnull終端のCStringに変換
-    let c_prompt = CString::new(prompt).ok()?;
-
-    unsafe {
-        let char_ptr: *mut c_char = readline(c_prompt.as_ptr());
-
-        if char_ptr.is_null() {
-            return None;
-        }
-
-        // スコープを抜ける際に確実にfreeするためのRAIIガード
-        let _guard = FreeGuard(char_ptr);
-
-        let c_str = CStr::from_ptr(char_ptr);
-        c_str.to_str().ok().map(|s| s.to_string())
-    }
-}
-
-/// RAIIパターンでreadlineが返したポインタを確実にfreeする
-struct FreeGuard(*mut c_char);
-
-impl Drop for FreeGuard {
-    fn drop(&mut self) {
-        unsafe {
-            libc::free(self.0 as *mut libc::c_void);
-        }
-    }
+    // 履歴を保存
+    rl.save_history(history_file)?;
+    Ok(())
 }
