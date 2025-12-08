@@ -159,29 +159,53 @@ impl Lexer {
     fn read_variable_or_word(&mut self, pos: Position) -> Result<Token, String> {
         let mut word = String::new();
 
-        // Start with $
-        word.push(self.current_char());
-        self.advance();
+        // Read the entire word, which may contain variable expansions
+        loop {
+            if self.is_eof() {
+                break;
+            }
 
-        // Check for ${VAR} syntax
-        if !self.is_eof() && self.current_char() == '{' {
-            word.push(self.current_char());
-            self.advance();
+            let ch = self.current_char();
 
-            while !self.is_eof() && self.current_char() != '}' {
+            if ch == '$' {
+                // Variable expansion
                 word.push(self.current_char());
                 self.advance();
-            }
 
-            if self.is_eof() {
-                return Err("Unclosed variable expansion".to_string());
-            }
+                // Check for ${VAR} syntax
+                if !self.is_eof() && self.current_char() == '{' {
+                    word.push(self.current_char());
+                    self.advance();
 
-            word.push(self.current_char()); // closing }
-            self.advance();
-        } else {
-            // $VAR syntax - read variable name
-            while !self.is_eof() && (self.current_char().is_alphanumeric() || self.current_char() == '_') {
+                    while !self.is_eof() && self.current_char() != '}' {
+                        word.push(self.current_char());
+                        self.advance();
+                    }
+
+                    if self.is_eof() {
+                        return Err("Unclosed variable expansion".to_string());
+                    }
+
+                    word.push(self.current_char()); // closing }
+                    self.advance();
+                } else {
+                    // $VAR syntax - read variable name
+                    while !self.is_eof() && (self.current_char().is_alphanumeric() || self.current_char() == '_') {
+                        word.push(self.current_char());
+                        self.advance();
+                    }
+                }
+            } else if self.is_word_char(ch) {
+                // Regular word character
+                word.push(self.current_char());
+                self.advance();
+            } else if ch.is_whitespace() || ch == ';' || ch == '&' || ch == '|'
+                    || ch == '>' || ch == '<' || ch == '(' || ch == ')'
+                    || ch == '{' || ch == '}' || ch == '\'' || ch == '"' {
+                // Word boundary
+                break;
+            } else {
+                // Other characters that might be part of a word (like /)
                 word.push(self.current_char());
                 self.advance();
             }
@@ -193,9 +217,55 @@ impl Lexer {
     fn read_word(&mut self, pos: Position) -> Result<Token, String> {
         let mut word = String::new();
 
-        while !self.is_eof() && self.is_word_char(self.current_char()) {
-            word.push(self.current_char());
-            self.advance();
+        // Read word characters, which may include variable expansions
+        loop {
+            if self.is_eof() {
+                break;
+            }
+
+            let ch = self.current_char();
+
+            if ch == '$' {
+                // Variable expansion within the word
+                word.push(self.current_char());
+                self.advance();
+
+                // Check for ${VAR} syntax
+                if !self.is_eof() && self.current_char() == '{' {
+                    word.push(self.current_char());
+                    self.advance();
+
+                    while !self.is_eof() && self.current_char() != '}' {
+                        word.push(self.current_char());
+                        self.advance();
+                    }
+
+                    if self.is_eof() {
+                        return Err("Unclosed variable expansion".to_string());
+                    }
+
+                    word.push(self.current_char()); // closing }
+                    self.advance();
+                } else {
+                    // $VAR syntax - read variable name
+                    while !self.is_eof() && (self.current_char().is_alphanumeric() || self.current_char() == '_') {
+                        word.push(self.current_char());
+                        self.advance();
+                    }
+                }
+            } else if self.is_word_char(ch) {
+                word.push(self.current_char());
+                self.advance();
+            } else if ch.is_whitespace() || ch == ';' || ch == '&' || ch == '|'
+                    || ch == '>' || ch == '<' || ch == '(' || ch == ')'
+                    || ch == '{' || ch == '}' || ch == '\'' || ch == '"' || ch == '=' {
+                // Word boundary
+                break;
+            } else {
+                // Other characters that might be part of a word (like /)
+                word.push(self.current_char());
+                self.advance();
+            }
         }
 
         // Check if it contains '='
