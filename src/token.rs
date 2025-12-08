@@ -23,6 +23,7 @@ pub enum TokenKind {
     And,            // &&
     Or,             // ||
     Semicolon,      // ;
+    DoubleSemicolon, // ;;
     Ampersand,      // &
     Not,            // !
 

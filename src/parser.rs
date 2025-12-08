@@ -80,9 +80,50 @@ impl Parser {
     //          | <LIST1> '\n' <NEWLINE-LIST> <LIST1>
     //          | <PIPELINE-COMMAND>
     fn parse_list1(&mut self) -> Result<Command, String> {
-        let mut left = self.parse_pipeline_command()?;
+        let mut items = Vec::new();
 
+        // Parse first command
+        let first_cmd = self.parse_pipeline_command()?;
+
+        // Check if there's a separator
+        let first_sep = if self.check(&TokenKind::And) {
+            self.advance();
+            self.skip_newlines();
+            Some(Separator::And)
+        } else if self.check(&TokenKind::Or) {
+            self.advance();
+            self.skip_newlines();
+            Some(Separator::Or)
+        } else if self.check(&TokenKind::Ampersand) {
+            self.advance();
+            self.skip_newlines();
+            Some(Separator::Background)
+        } else if self.check(&TokenKind::Semicolon) {
+            self.advance();
+            self.skip_newlines();
+            Some(Separator::Sequential)
+        } else if self.check(&TokenKind::Newline) {
+            self.advance();
+            self.skip_newlines();
+            Some(Separator::Sequential)
+        } else {
+            None
+        };
+
+        // If no separator, just return the single command
+        if first_sep.is_none() {
+            return Ok(first_cmd);
+        }
+
+        items.push(ListItem {
+            command: first_cmd,
+            separator: first_sep.unwrap(),
+        });
+
+        // Parse remaining commands
         loop {
+            let cmd = self.parse_pipeline_command()?;
+
             let separator = if self.check(&TokenKind::And) {
                 self.advance();
                 self.skip_newlines();
@@ -104,26 +145,21 @@ impl Parser {
                 self.skip_newlines();
                 Separator::Sequential
             } else {
+                // No separator after this command, it's the last one
+                items.push(ListItem {
+                    command: cmd,
+                    separator: Separator::Sequential,
+                });
                 break;
             };
 
-            let right = self.parse_pipeline_command()?;
-
-            left = Command::List(List {
-                items: vec![
-                    ListItem {
-                        command: left,
-                        separator: separator.clone(),
-                    },
-                    ListItem {
-                        command: right,
-                        separator: Separator::Sequential,
-                    },
-                ],
+            items.push(ListItem {
+                command: cmd,
+                separator,
             });
         }
 
-        Ok(left)
+        Ok(Command::List(List { items }))
     }
 
     // <PIPELINE-COMMAND> ::= <PIPELINE>
@@ -178,24 +214,35 @@ impl Parser {
     //            | <SHELL-COMMAND>
     //            | <SHELL-COMMAND> <REDIRECTION-LIST>
     fn parse_command(&mut self) -> Result<Command, String> {
-        if self.check(&TokenKind::If) {
-            self.parse_if_command()
+        let cmd = if self.check(&TokenKind::If) {
+            self.parse_if_command()?
         } else if self.check(&TokenKind::While) {
-            self.parse_while_command()
+            self.parse_while_command()?
         } else if self.check(&TokenKind::Until) {
-            self.parse_until_command()
+            self.parse_until_command()?
         } else if self.check(&TokenKind::For) {
-            self.parse_for_command()
+            self.parse_for_command()?
         } else if self.check(&TokenKind::Case) {
-            self.parse_case_command()
+            self.parse_case_command()?
         } else if self.check(&TokenKind::LeftParen) {
-            self.parse_subshell()
+            self.parse_subshell()?
         } else if self.check(&TokenKind::LeftBrace) {
-            self.parse_group_command()
+            self.parse_group_command()?
         } else if self.check(&TokenKind::Function) {
-            self.parse_function_def()
+            self.parse_function_def()?
         } else {
-            self.parse_simple_command()
+            return self.parse_simple_command();
+        };
+
+        // Check for redirection list after shell command
+        let redirections = self.parse_redirection_list()?;
+        if !redirections.is_empty() {
+            Ok(Command::Redirected(RedirectedCommand {
+                command: Box::new(cmd),
+                redirections,
+            }))
+        } else {
+            Ok(cmd)
         }
     }
 
@@ -293,6 +340,14 @@ impl Parser {
         };
 
         Ok(Redirection { kind, fd, target })
+    }
+
+    fn parse_redirection_list(&mut self) -> Result<Vec<Redirection>, String> {
+        let mut redirections = Vec::new();
+        while self.is_redirection() {
+            redirections.push(self.parse_redirection()?);
+        }
+        Ok(redirections)
     }
 
     fn parse_if_command(&mut self) -> Result<Command, String> {
@@ -513,9 +568,8 @@ impl Parser {
 
             cases.push(CaseClause { patterns, body });
 
-            if self.check(&TokenKind::Semicolon) {
+            if self.check(&TokenKind::DoubleSemicolon) {
                 self.advance();
-                self.advance(); // ;;
             }
             self.skip_newlines();
         }
@@ -538,18 +592,12 @@ impl Parser {
 
     fn parse_group_command(&mut self) -> Result<Command, String> {
         self.expect(&TokenKind::LeftBrace)?;
-        self.skip_newlines();
 
-        let mut commands = Vec::new();
-
-        while !self.check(&TokenKind::RightBrace) {
-            commands.push(self.parse_list()?);
-            self.skip_newlines();
-        }
+        let list = self.parse_list()?;
 
         self.expect(&TokenKind::RightBrace)?;
 
-        Ok(Command::Group(commands))
+        Ok(Command::Group(Box::new(list)))
     }
 
     fn parse_function_def(&mut self) -> Result<Command, String> {

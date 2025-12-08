@@ -13,7 +13,14 @@ pub enum Command {
     For(ForCommand),
     Case(CaseCommand),
     FunctionDef(FunctionDef),
-    Group(Vec<Command>),
+    Group(Box<Command>),
+    Redirected(RedirectedCommand),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RedirectedCommand {
+    pub command: Box<Command>,
+    pub redirections: Vec<Redirection>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

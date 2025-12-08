@@ -52,7 +52,7 @@ impl Lexer {
                 self.advance();
                 if self.current_char() == ';' {
                     self.advance();
-                    Ok(Token::new(TokenKind::Semicolon, ";;".to_string(), pos))
+                    Ok(Token::new(TokenKind::DoubleSemicolon, ";;".to_string(), pos))
                 } else {
                     Ok(Token::new(TokenKind::Semicolon, ";".to_string(), pos))
                 }
