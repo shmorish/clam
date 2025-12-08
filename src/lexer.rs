@@ -146,6 +146,7 @@ impl Lexer {
             }
             '"' => self.read_quoted_string('"'),
             '\'' => self.read_quoted_string('\''),
+            '$' => self.read_variable_or_word(pos),
             _ if ch.is_ascii_digit() => self.read_number_or_word(pos),
             _ if self.is_word_start(ch) => self.read_word(pos),
             _ => Err(format!(
@@ -153,6 +154,40 @@ impl Lexer {
                 ch, self.line, self.column
             )),
         }
+    }
+
+    fn read_variable_or_word(&mut self, pos: Position) -> Result<Token, String> {
+        let mut word = String::new();
+
+        // Start with $
+        word.push(self.current_char());
+        self.advance();
+
+        // Check for ${VAR} syntax
+        if !self.is_eof() && self.current_char() == '{' {
+            word.push(self.current_char());
+            self.advance();
+
+            while !self.is_eof() && self.current_char() != '}' {
+                word.push(self.current_char());
+                self.advance();
+            }
+
+            if self.is_eof() {
+                return Err("Unclosed variable expansion".to_string());
+            }
+
+            word.push(self.current_char()); // closing }
+            self.advance();
+        } else {
+            // $VAR syntax - read variable name
+            while !self.is_eof() && (self.current_char().is_alphanumeric() || self.current_char() == '_') {
+                word.push(self.current_char());
+                self.advance();
+            }
+        }
+
+        Ok(Token::new(TokenKind::Word, word, pos))
     }
 
     fn read_word(&mut self, pos: Position) -> Result<Token, String> {
@@ -167,10 +202,39 @@ impl Lexer {
         if !self.is_eof() && self.current_char() == '=' {
             word.push('=');
             self.advance();
-            while !self.is_eof() && self.is_word_char(self.current_char()) {
-                word.push(self.current_char());
-                self.advance();
+
+            // Read the value part (which might be quoted)
+            if !self.is_eof() {
+                if self.current_char() == '"' || self.current_char() == '\'' {
+                    // Read quoted value
+                    let quote = self.current_char();
+                    self.advance(); // Skip opening quote
+
+                    while !self.is_eof() && self.current_char() != quote {
+                        if self.current_char() == '\\' && quote == '"' {
+                            self.advance();
+                            if !self.is_eof() {
+                                word.push(self.current_char());
+                                self.advance();
+                            }
+                        } else {
+                            word.push(self.current_char());
+                            self.advance();
+                        }
+                    }
+
+                    if !self.is_eof() {
+                        self.advance(); // Skip closing quote
+                    }
+                } else {
+                    // Read unquoted value
+                    while !self.is_eof() && self.is_word_char(self.current_char()) {
+                        word.push(self.current_char());
+                        self.advance();
+                    }
+                }
             }
+
             return Ok(Token::new(TokenKind::AssignmentWord, word, pos));
         }
 
@@ -235,12 +299,11 @@ impl Lexer {
     fn read_quoted_string(&mut self, quote: char) -> Result<Token, String> {
         let pos = Position::new(self.line, self.column);
         let mut value = String::new();
-        value.push(quote);
         self.advance(); // Skip opening quote
 
         while !self.is_eof() && self.current_char() != quote {
             if self.current_char() == '\\' && quote == '"' {
-                value.push(self.current_char());
+                // Handle escape sequences in double quotes
                 self.advance();
                 if !self.is_eof() {
                     value.push(self.current_char());
@@ -256,7 +319,6 @@ impl Lexer {
             return Err(format!("Unterminated string at {}:{}", pos.line, pos.column));
         }
 
-        value.push(quote);
         self.advance(); // Skip closing quote
 
         Ok(Token::new(TokenKind::Word, value, pos))
